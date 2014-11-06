@@ -1,0 +1,190 @@
+varying float iGlobalTime;
+varying vec2 iResolution;
+
+vec3 rotateX (float a, vec3 v) {
+    return vec3(v.x, 
+                cos(a)*v.y + sin(a) * v.z,
+                cos(a)*v.z - sin(a) * v.y);
+}
+
+vec3 rotateY (float a, vec3 v) {
+    return vec3(cos(a)*v.x + sin(a) * v.z, 
+                v.y,
+                cos(a)*v.z - sin(a) * v.x);
+}
+
+vec3 hash3( float n )
+{
+  return fract(sin(vec3(n,n+1.0,n+2.0))*vec3(43758.5453123,22578.1459123,19642.3490423));
+}
+
+
+float snoise( vec2 p ) {
+    vec2 f = fract(p);
+    p = floor(p);
+    float v = p.x+p.y*1000.0;
+    vec4 r = vec4(v, v+1.0, v+1000.0, v+1001.0);
+    r = fract(100000.0*sin(r*.001));
+    f = f*f*(3.0-2.0*f);
+    return 2.0*(mix(mix(r.x, r.y, f.x), mix(r.z, r.w, f.x), f.y))-1.0;
+}
+
+float terrain( vec2 p, int octaves ) {  
+    float h = 0.0; // height
+    float w = 0.5; // octave weight
+    float m = 0.4; // octave multiplier
+    for (int i=0; i<16; i++) {
+        if (i<octaves) {
+            h += w * snoise((p * m));
+        }
+        else break;
+        w *= 0.5;
+        m *= 2.0;
+    }
+    return h;
+}
+
+/*float map2 (in vec3 p) {
+    float plane = p.y + 1.0;
+    float sphere = length(p) - 1.0;
+    
+    plane += fbm(p);
+
+    /*p.x += 2.0;
+    p.z += 1.0;
+
+    vec3 q = rotateY(p.y*.9, p);
+
+    vec3 d = abs(q) - vec3(1.0, 4.5, 1.0);
+    float cube = min(max(d.x,max(d.y,d.z)),0.0) +
+                 length(max(d,0.0));
+
+    cube += 0.9*noise(p);
+
+    p.x += -5.0;
+    p.z += 3.0;
+
+    d = abs(p) - vec3(1.0, 3.0, 1.0);
+    float cube2 = min(max(d.x,max(d.y,d.z)),0.0) +
+                 length(max(d,0.0));
+
+
+    return min(cube , min(cube2, plane));
+
+    return plane;
+}*/
+
+
+float map( in vec3 p ) {
+    
+    float dMin = 28.0; // nearest intersection
+    float d; // depth
+    float mID = -1.0; // material ID
+    
+    // terrain
+    float h = terrain(p.xz, 4);
+    h += smoothstep(-0.3, 1.5, h); // exaggerate the higher terrain
+    h *= smoothstep(-1.5, -0.3, h); // smooth out the lower terrain
+    d = p.y - h;    
+
+    return d;
+}
+
+vec3 calcNormal( in vec3 pos ) {
+    vec3 eps = vec3(0.2,0.0,0.0);
+
+    return normalize( vec3(
+           map(pos+eps.xyy) - map(pos-eps.xyy),
+           map(pos+eps.yxy) - map(pos-eps.yxy),
+           map(pos+eps.yyx) - map(pos-eps.yyx)) );
+}
+
+float softshadow( in vec3 ro, in vec3 rd, float mint, float k ) {
+    float res = 1.0;
+    float t = mint;
+    for( int i=0; i<48; i++ )
+    {
+        float h = map(ro + rd*t);
+        h = max( h, 0.0 );
+        res = min( res, k*h/t );
+        t += clamp( h, 0.01, 0.5 );
+    }
+    return clamp(res,0.0,1.0);
+}
+
+float calcAO( in vec3 pos, in vec3 nor ) {
+    float totao = 0.0;
+    for( int aoi=0; aoi<16; aoi++ )
+    {
+        vec3 aopos = -1.0+2.0*hash3(float(aoi)*213.47);
+        aopos *= sign( dot(aopos,nor) );
+        aopos = pos + aopos*0.5;
+        float dd = clamp( map( aopos )*4.0, 0.0, 1.0 );
+        totao += dd;
+    }
+    totao /= 16.0;
+    
+    return clamp( totao*totao*1.5, 0.0, 1.0 );
+}
+
+float intersect (in vec3 ro, in vec3 rd) {
+
+    float h = 1.0;
+    float tmax = 45.0;
+    float t = 0.0;
+
+    for (int i=0; i<180; i++) {
+        if (h < 0.0001 || t > tmax) break;
+
+        h = map(ro + t*rd);
+        t += h;
+    }
+
+    return t;
+}
+
+void main(void) {
+
+    vec2 uv = gl_FragCoord.xy / iResolution.xy;
+    vec2 p = -1.0 + 2.0 * uv;
+    p.x *= iResolution.x / iResolution.y;
+
+    vec3 ro = vec3 (0.0+2.0*iGlobalTime, 0.0, 1.0+3.0*sin(iGlobalTime));
+    ro.y = terrain(ro.xz, 4) + 1.5;
+
+    vec3 rd = normalize(vec3(p, -1.0));
+
+    float tmax = 20.0;
+    float t = intersect(ro, rd);
+
+    vec3 lig = rotateY(0.0, vec3(6.5,4.5,-10.0));
+
+    vec3 col = vec3(0.0);
+
+    if (t<tmax) {
+        vec3 pos = ro + t*rd;
+        vec3 nor = calcNormal (pos);
+        vec3 ligh = normalize(lig - pos);
+
+        float occ = calcAO( pos, nor );
+        float diff = clamp(dot(nor, ligh), 0.0, 1.0);
+        float amb  = clamp(nor.y, 0.0, 1.0);
+        float sha  = 0.0; if (diff>0.01) sha = softshadow(pos, ligh, 0.0, 32.0);
+
+        col = vec3(.9, 0.2, 0.5)*diff*pow(vec3(sha),vec3(1.0,2.2,1.5)) +
+              vec3(.05, .05, .05)*amb*occ;
+
+        col += 0.2;
+
+        //col = vec3(occ);
+    } else {
+        col = vec3(0.5, 0.5, 1.0);
+
+        vec3 sun = vec3(1.0,0.8,0.5)*pow(clamp(dot(rd,normalize(lig)),0.0,1.0), 32.0);
+        col += sun;
+
+    }
+
+
+    gl_FragColor = vec4(col, 1.0);
+}

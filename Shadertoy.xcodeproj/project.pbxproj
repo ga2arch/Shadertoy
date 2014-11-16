@@ -255,7 +255,6 @@
 					"$(inherited)",
 					/usr/local/Cellar/glfw3/3.0.4/lib,
 					/usr/local/Cellar/glew/1.11.0/lib,
-					/usr/local/Cellar/libuv/0.10.21/lib,
 				);
 				PRODUCT_NAME = "$(TARGET_NAME)";
 			};

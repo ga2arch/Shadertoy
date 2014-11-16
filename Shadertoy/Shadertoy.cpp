@@ -10,8 +10,7 @@
 
 bool recompile = false;
 
-Shadertoy::Shadertoy(): g_width(120),
-                        g_heigth(120){};
+Shadertoy::Shadertoy(): g_width(480), g_heigth(320) {};
 
 Shadertoy::~Shadertoy() {};
 
@@ -52,7 +51,7 @@ bool Shadertoy::init() {
     
     printf("Renderer: %s\n", renderer);
     printf("Version: %s\n", version);
-    
+
     return true;
 }
 
